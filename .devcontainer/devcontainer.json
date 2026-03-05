@@ -7,8 +7,3 @@
     "8501": { "label": "Streamlit", "onAutoForward": "openBrowser" }
   }
 }
-```
-
-Save and close. Then:
-```
-notepad .streamlit\config.toml

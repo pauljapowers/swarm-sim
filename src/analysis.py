@@ -360,3 +360,4 @@ def patch_attribution_table(dfs: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         row["p_any_req2"]       = df["any_req2"].mean() if "any_req2" in df else float("nan")
         rows.append(row)
     return pd.DataFrame(rows).set_index("mode")
+def ewd(values, n_bins=5): import numpy as np; bins = np.linspace(min(values), max(values), n_bins+1); return np.digitize(values, bins, right=True)

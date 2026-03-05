@@ -1,0 +1,11 @@
+[server]
+enableCORS = false
+enableXsrfProtection = false
+headless = true
+```
+
+Save and close. Then commit and push both:
+```
+git add .
+git commit -m "Add devcontainer and Streamlit config for Codespaces"
+git push

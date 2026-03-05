@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import copy
 import os
+import matplotlib.pyplot as plt
 import sys
 from typing import Dict, Optional
 

@@ -1,0 +1,12 @@
+venv/
+data/raw/
+data/aggregated/
+data/plots/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+.env

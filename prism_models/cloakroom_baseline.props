@@ -1,0 +1,65 @@
+// cloakroom_baseline.pm – PRISM CSL property specifications
+// Mirrors properties from Abeywickrama et al. IEEE ERAS 2025
+
+// ── REQ 1: Fire exit properties ───────────────────────────────────────────────
+
+// P1: Probability of a robot eventually entering the red zone within T timesteps
+P=? [ F<=T "unsafe_fireexitsblocked" ]
+
+// P2: Probability of at least 2 robots entering the amber zone within T timesteps
+P=? [ F<=T "unsafe_amber_critical" ]
+
+// P3: Probability of a (single) robot entering the amber zone within T timesteps
+P=? [ F<=T "unsafe_amber" ]
+
+// P4: Filter – sum over states satisfying red-zone entry
+filter(sum, P=? [ X "unsafe_red" ])
+
+// P5: Filter – average over states satisfying red-zone entry
+filter(avg, P=? [ X "unsafe_red" ])
+
+
+// ── REQ 2: Density / stationary robots ───────────────────────────────────────
+
+// P6: Probability of density violation within T timesteps
+P=? [ F<=T "unsafe_density" ]
+
+
+// ── Reward-based progress properties ─────────────────────────────────────────
+
+// R1: Cumulative reward for main states (SEARCHING, PICKUP, DROPOFF) up to T
+R{"main_states"}=? [C<=T]
+
+// R2: Cumulative reward for avoidance states up to T
+R{"avoidance_states"}=? [C<=T]
+
+
+// ── State-rate analysis ───────────────────────────────────────────────────────
+
+// P7: Probability of SEARCHING state reaching level >=3 within first 99 steps
+P=? [ F[0,99] (n_s >= 3) ]
+
+// P8: Probability of DROPOFF state reaching level >=3 between steps 100-199
+P=? [ F[100,199] (n_d >= 3) ]
+
+// P9: Probability of being in SEARCHING (n_s>=1) within 99 steps
+//     while staying in DROPOFF (n_d>=1) beforehand; at least 0.25
+P>=0.25 [ n_d>=1 U<=99.0 n_s>=1 ]
+
+
+// ── Counterexample / witness properties ──────────────────────────────────────
+
+// CTL A1: Invariant – fire exit never blocked (counterexample if violated)
+A[ G !"unsafe_red" ]
+
+// CTL E1: Witness – system eventually reaches DROPOFF state
+E [ F (n_d > 0) ]
+
+
+// ── Patch-extended properties (Modes B and C) ─────────────────────────────────
+
+// P10: Probability of red-zone violation (unsafe state) occurring
+P=? [ F<=T "unsafe_fireexitsblocked" ]
+
+// (Condition on patch active – handled externally via separate models
+//  for baseline vs patches_no_adapt vs patches_adapt)

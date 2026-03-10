@@ -7,48 +7,58 @@
 #           "patches_no_adapt" (Mode B) patches_enabled=True,  adapt=False
 #           "patches_adapt"    (Mode C) patches_enabled=True,  adapt=True
 #           "adapt_only"       (Mode D) patches_enabled=False, adapt=True
+#           (Mode D is a sanity check: adaptation code is on but has no
+#            patches to sense, so it is expected to be identical to baseline)
 mode: "baseline"
 
-# Fine-grained toggles (overridden by 'mode' when using experiments.py)
 patches_enabled: false
 robot_patch_adaptation_enabled: false
 
 # ── Arena ────────────────────────────────────────────────────
 arena:
-  width: 3.70          # metres
-  height: 3.70         # metres
-  # Coordinate origin at centre of arena; walls at ±1.85 m
+  width: 3.70
+  height: 3.70
 
 # ── Zones ────────────────────────────────────────────────────
 zones:
   red:
-    # Bottom-left corner; width 0.85 m, height 1.85 m
-    x_min: -1.85       # left wall
-    x_max: -1.00       # x_min + 0.85
-    y_min: -1.85       # bottom wall
-    y_max:  0.00       # y_min + 1.85
+    x_min: -1.85
+    x_max: -1.00
+    y_min: -1.85
+    y_max:  0.00
   amber:
-    margin: 0.50       # 0.50 m buffer around red zone
+    margin: 0.50
   deposit:
-    # Right wall; width 0.85 m, full height
-    x_min:  1.00       # right_wall - 0.85
-    x_max:  1.85       # right wall
+    x_min:  1.00
+    x_max:  1.85
     y_min: -1.85
     y_max:  1.85
+
+# ── Functional goal points (REQ-F1 / REQ-F2) ─────────────────
+# REQ-F1: Robots must retrieve carriers from the collection point.
+# REQ-F2: Robots must deposit all carriers at the drop-off point
+#         (centre of deposit zone) before end of trial.
+# collection_x / collection_y define where carriers are concentrated.
+# The drop-off point is derived automatically as the deposit zone centre.
+functional:
+  collection_x: -0.5     # x-coordinate of collection point (left-centre)
+  collection_y:  0.0     # y-coordinate of collection point
+  # Minimum task completion rate considered acceptable (for REQ-F2 checking)
+  min_completion_rate: 0.0   # set >0 to enforce partial completion threshold
 
 # ── Robots ───────────────────────────────────────────────────
 robots:
   count: 5
-  diameter: 0.25       # metres
-  max_speed: 2.0       # m/s
-  avoidance_range: 1.0 # effective IR sensor range (LF abstraction), metres
-  avoidance_margin: 0.05  # 5 cm extra margin
-  heading_change_interval: 0.4  # seconds (every 10 timesteps @ dt=0.04)
+  diameter: 0.25
+  max_speed: 2.0
+  avoidance_range: 1.0
+  avoidance_margin: 0.05
+  heading_change_interval: 0.4
 
 # ── Carriers ─────────────────────────────────────────────────
 carriers:
   count: 3
-  diameter: 0.25       # LF circular abstraction (≈ robot size)
+  diameter: 0.25
   initial_positions:
     - [-1.0, 0.0]
     - [ 0.0, 0.0]
@@ -56,61 +66,55 @@ carriers:
 
 # ── PFSM probabilities ───────────────────────────────────────
 pfsm:
-  Ps: 0.05   # probability of finding a carrier (per timestep, in SEARCHING)
-  Pp: 0.10   # probability of picking up carrier (per timestep, in PICKUP)
-  Pd: 0.08   # probability of dropping off carrier (per timestep, in DROPOFF)
-  Pa: 0.15   # probability of transitioning to avoidance state
+  Ps: 0.05
+  Pp: 0.10
+  Pd: 0.08
+  Pa: 0.15
 
 # ── Simulation timing ────────────────────────────────────────
 simulation:
-  dt: 0.04             # seconds per timestep
-  duration: 200.0      # seconds per trial
-  # => 5000 timesteps per trial (200/0.04)
+  dt: 0.04
+  duration: 200.0
   num_trials: 1000
 
 # ── REQ2 stationary threshold ────────────────────────────────
 req2:
-  stationary_threshold: 10.0   # seconds without movement
-  stationary_fraction: 0.10    # < 10% of robots stationary outside deposit
+  stationary_threshold: 10.0
+  stationary_fraction: 0.10
 
 # ── Friction patch configuration ─────────────────────────────
 friction:
-  # Normalised effective friction coefficient (mu_eff)
   baseline: 1.00
   water:    0.50
   oil:      0.30
   ice:      0.15
 
-  # Patch activation schedule (Markov two-state on/off)
-  on_duration_min:  5.0    # seconds
+  on_duration_min:  5.0
   on_duration_max: 30.0
   off_duration_min: 5.0
   off_duration_max: 30.0
 
-  # Patch list for extended experiments
-  # Each entry: {spill_type, x, y, width, height, placement}
-  # If placement is "random", x/y/width/height are ignored and auto-generated
   num_patches: 3
-  patch_size: 0.50          # metres (square patches)
+  patch_size: 0.50
   placement_strategy: "random"   # "random" | "near_red" | "near_deposit"
-  patches: []               # populated programmatically or override here
+  patches: []
 
 # ── Normative adaptation parameters ──────────────────────────
 adaptation:
-  speed_reduction_factor: 0.50      # max_speed *= this when patch sensed
-  extra_clearance_red: 0.20         # extra metres added to avoidance near red
-  slip_detection_threshold: 0.30    # direction error (rad) triggering patch_sensed
-  slip_detection_window: 5          # timesteps over which slip is averaged
+  speed_reduction_factor: 0.50
+  extra_clearance_red: 0.20
+  slip_detection_threshold: 0.30
+  slip_detection_window: 5
 
 # ── Data logging ─────────────────────────────────────────────
 logging:
   output_dir: "data/raw"
   aggregated_dir: "data/aggregated"
-  log_every_n_steps: 1              # 1 = every timestep
-  patch_contact_window: 5.0         # seconds – "recently on patch" flag
+  log_every_n_steps: 1
+  patch_contact_window: 5.0
 
 # ── PRISM export ─────────────────────────────────────────────
 prism:
   output_dir: "prism_models"
-  ewd_levels: 5                     # L1–L5 equal-width discretisation
-  sample_every: 50                  # timesteps (LF: sample every 50 of 5000)
+  ewd_levels: 5
+  sample_every: 50

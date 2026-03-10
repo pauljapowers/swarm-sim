@@ -1,6 +1,9 @@
 """
-analysis.py – Statistical analysis, uncertainty quantification, and plotting
-             for swarm cloakroom simulation results.
+analysis.py – Statistical analysis, uncertainty quantification, and plotting.
+
+Updated to handle split violation metrics:
+  t_red_first_viol / t_red_total_viol  (and amber, req2 equivalents)
+  task_completion_rate
 """
 
 from __future__ import annotations
@@ -20,15 +23,12 @@ from scipy import stats as scipy_stats
 
 
 # ---------------------------------------------------------------------------
-# Bootstrap CI helper
+# Bootstrap CI
 # ---------------------------------------------------------------------------
 
 def bootstrap_ci(data: np.ndarray, stat_fn=np.mean,
                  n_boot: int = 2000, alpha: float = 0.05,
                  rng_seed: int = 42) -> Tuple[float, float, float]:
-    """
-    Return (point_estimate, lower_ci, upper_ci) using percentile bootstrap.
-    """
     rng = np.random.default_rng(rng_seed)
     n = len(data)
     if n == 0:
@@ -45,42 +45,53 @@ def bootstrap_ci(data: np.ndarray, stat_fn=np.mean,
 # ---------------------------------------------------------------------------
 
 def summarise_mode(df: pd.DataFrame) -> pd.Series:
-    """
-    Compute summary statistics from a per-trial metrics DataFrame.
-    Each row of df corresponds to one trial.
-    """
-    def prob(col: str) -> Tuple[float, float, float]:
-        arr = df[col].values.astype(float)
-        return bootstrap_ci(arr)
-
     summary = {}
+
+    # Violation probabilities
     for col, label in [
         ("any_req1_red",   "p_req1_red"),
         ("any_req1_amber", "p_req1_amber"),
         ("any_req2",       "p_req2"),
+        ("any_req_functional", "p_functional"),
     ]:
         if col in df.columns:
-            mean_, lo, hi = prob(col)
-            summary[f"{label}_mean"] = mean_
+            mean_, lo, hi = bootstrap_ci(df[col].values.astype(float))
+            summary[f"{label}_mean"]  = mean_
             summary[f"{label}_ci_lo"] = lo
             summary[f"{label}_ci_hi"] = hi
 
-    for col in ["t_red_viol", "t_amber_viol", "t_req2_viol"]:
+    # Time-to-first and total violation durations
+    time_cols = [
+        ("t_red_first_viol",   "t_red_first"),
+        ("t_amber_first_viol", "t_amber_first"),
+        ("t_req2_first_viol",  "t_req2_first"),
+        ("t_red_total_viol",   "t_red_total"),
+        ("t_amber_total_viol", "t_amber_total"),
+        ("t_req2_total_viol",  "t_req2_total"),
+        # backward-compat
+        ("t_red_viol",   "t_red_viol"),
+        ("t_amber_viol", "t_amber_viol"),
+        ("t_req2_viol",  "t_req2_viol"),
+    ]
+    for col, label in time_cols:
         if col in df.columns:
             arr = df[col].values.astype(float)
-            summary[f"{col}_mean"]  = float(np.mean(arr))
-            summary[f"{col}_std"]   = float(np.std(arr))
-            summary[f"{col}_p95"]   = float(np.percentile(arr, 95))
+            summary[f"{label}_mean"] = float(np.mean(arr))
+            summary[f"{label}_std"]  = float(np.std(arr))
+            summary[f"{label}_p95"]  = float(np.percentile(arr, 95))
+
+    # Functional metrics
+    for col in ["task_completion_rate", "n_carriers_deposited"]:
+        if col in df.columns:
+            arr = df[col].values.astype(float)
+            summary[f"{col}_mean"] = float(np.mean(arr))
+            summary[f"{col}_std"]  = float(np.std(arr))
 
     summary["n_trials"] = len(df)
     return pd.Series(summary)
 
 
 def compare_modes(dfs: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """
-    Compare multiple modes (each keyed by mode name).
-    Returns a DataFrame with one row per mode.
-    """
     rows = []
     for mode_name, df in dfs.items():
         row = summarise_mode(df)
@@ -94,7 +105,6 @@ def compare_modes(dfs: Dict[str, pd.DataFrame]) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def load_aggregated(directory: str) -> Dict[str, pd.DataFrame]:
-    """Load all metrics_<mode>.csv files from a directory."""
     dfs = {}
     for p in Path(directory).glob("metrics_*.csv"):
         mode = p.stem.replace("metrics_", "")
@@ -108,36 +118,32 @@ def load_raw_trial(directory: str, trial_id: int) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Plot: violation probabilities comparison
+# Plot: violation probabilities
 # ---------------------------------------------------------------------------
 
 def plot_violation_probs(comparison_df: pd.DataFrame,
                          output_path: Optional[str] = None,
                          title: str = "Violation Probabilities by Mode") -> plt.Figure:
-    """
-    Bar chart of P(REQ1 red), P(REQ1 amber), P(REQ2) across modes.
-    """
     modes = list(comparison_df.index)
     metrics = [
         ("p_req1_red_mean",   "p_req1_red_ci_lo",   "p_req1_red_ci_hi",   "REQ1 Red"),
         ("p_req1_amber_mean", "p_req1_amber_ci_lo", "p_req1_amber_ci_hi", "REQ1 Amber"),
         ("p_req2_mean",       "p_req2_ci_lo",        "p_req2_ci_hi",       "REQ2 Density"),
+        ("p_functional_mean", "p_functional_ci_lo",  "p_functional_ci_hi", "REQ-F Task Complete"),
     ]
+    # Only include metrics present in the dataframe
+    metrics = [(m, l, h, lbl) for m, l, h, lbl in metrics if m in comparison_df.columns]
 
-    fig, axes = plt.subplots(1, 3, figsize=(14, 5), sharey=False)
+    n = len(metrics)
+    fig, axes = plt.subplots(1, n, figsize=(4 * n + 2, 5), sharey=False)
+    if n == 1:
+        axes = [axes]
     colors = plt.cm.Set2(np.linspace(0, 0.8, len(modes)))
 
     for ax, (mean_col, lo_col, hi_col, label) in zip(axes, metrics):
-        if mean_col not in comparison_df.columns:
-            ax.set_title(label + "\n(no data)")
-            continue
         means = comparison_df[mean_col].values
-        lows  = np.array([comparison_df[lo_col].values[i]
-                          if lo_col in comparison_df.columns else means[i]
-                          for i in range(len(modes))])
-        highs = np.array([comparison_df[hi_col].values[i]
-                          if hi_col in comparison_df.columns else means[i]
-                          for i in range(len(modes))])
+        lows  = comparison_df[lo_col].values  if lo_col  in comparison_df.columns else means
+        highs = comparison_df[hi_col].values  if hi_col  in comparison_df.columns else means
         yerr_lo = means - lows
         yerr_hi = highs - means
 
@@ -161,25 +167,33 @@ def plot_violation_probs(comparison_df: pd.DataFrame,
 
 
 # ---------------------------------------------------------------------------
-# Plot: time in unsafe states (boxplot)
+# Plot: time in unsafe states (boxplot) — updated for split columns
 # ---------------------------------------------------------------------------
 
 def plot_time_in_unsafe(dfs: Dict[str, pd.DataFrame],
                         output_path: Optional[str] = None,
-                        title: str = "Time in Unsafe States (seconds)") -> plt.Figure:
-    cols = [("t_red_viol", "REQ1 Red Zone"),
-            ("t_amber_viol", "REQ1 Amber Zone"),
-            ("t_req2_viol", "REQ2 Density")]
+                        title: str = "Time in Unsafe / Functional States") -> plt.Figure:
+    # Show both first-violation time and total violation time side by side
+    cols = [
+        ("t_red_first_viol",   "REQ1 Red\nTime-to-First (s)"),
+        ("t_red_total_viol",   "REQ1 Red\nTotal Duration (s)"),
+        ("t_amber_first_viol", "REQ1 Amber\nTime-to-First (s)"),
+        ("t_amber_total_viol", "REQ1 Amber\nTotal Duration (s)"),
+        ("task_completion_rate", "Task Completion\nRate"),
+    ]
+    # Filter to columns that exist in at least one df
+    available = [c for c in cols
+                 if any(c[0] in df.columns for df in dfs.values())]
 
-    n_metrics = len(cols)
-    fig, axes = plt.subplots(1, n_metrics, figsize=(5 * n_metrics, 5))
+    n_metrics = len(available)
+    fig, axes = plt.subplots(1, n_metrics, figsize=(4 * n_metrics, 5))
     if n_metrics == 1:
         axes = [axes]
 
     mode_names = list(dfs.keys())
     colors = plt.cm.Set2(np.linspace(0, 0.8, len(mode_names)))
 
-    for ax, (col, label) in zip(axes, cols):
+    for ax, (col, label) in zip(axes, available):
         data_to_plot = []
         valid_modes = []
         for mode in mode_names:
@@ -197,7 +211,7 @@ def plot_time_in_unsafe(dfs: Dict[str, pd.DataFrame],
         ax.set_xticks(range(1, len(valid_modes) + 1))
         ax.set_xticklabels(valid_modes, rotation=30, ha="right")
         ax.set_title(label, fontweight="bold")
-        ax.set_ylabel("Time (s)")
+        ax.set_ylabel("Value")
 
     fig.suptitle(title, fontweight="bold", fontsize=13)
     plt.tight_layout()
@@ -214,32 +228,33 @@ def plot_trial_trajectory(trial_df: pd.DataFrame,
                           arena_half: float = 1.85,
                           output_path: Optional[str] = None,
                           title: str = "Robot Trajectories") -> plt.Figure:
-    """Plot (x,y) trajectories of all robots for one trial."""
     fig, ax = plt.subplots(figsize=(7, 7))
     ax.set_xlim(-arena_half, arena_half)
     ax.set_ylim(-arena_half, arena_half)
     ax.set_aspect("equal")
 
-    # Draw zones
-    red_rect = mpatches.Rectangle(
-        (-1.85, -1.85), 0.85, 1.85,
-        linewidth=1, edgecolor="red", facecolor="red", alpha=0.18, label="Red zone")
-    amber_rect = mpatches.Rectangle(
-        (-1.85 - 0.5, -1.85 - 0.5), 0.85 + 1.0, 1.85 + 0.5,
-        linewidth=1, edgecolor="orange", facecolor="orange", alpha=0.12, label="Amber zone")
-    deposit_rect = mpatches.Rectangle(
-        (1.00, -1.85), 0.85, 3.70,
-        linewidth=1, edgecolor="blue", facecolor="blue", alpha=0.12, label="Deposit zone")
+    red_rect    = mpatches.Rectangle((-1.85, -1.85), 0.85, 1.85,
+                    linewidth=1, edgecolor="red", facecolor="red", alpha=0.18)
+    amber_rect  = mpatches.Rectangle((-2.35, -2.35), 1.85, 2.35,
+                    linewidth=1, edgecolor="orange", facecolor="orange", alpha=0.12)
+    deposit_rect = mpatches.Rectangle((1.00, -1.85), 0.85, 3.70,
+                    linewidth=1, edgecolor="blue", facecolor="blue", alpha=0.12)
     for p in [amber_rect, red_rect, deposit_rect]:
         ax.add_patch(p)
 
-    # Trajectories
+    # Collection point marker
+    ax.plot(-0.5, 0.0, "D", color="#cc6600", markersize=10, zorder=8,
+            label="Collection point")
+    # Drop-off point marker
+    ax.plot(1.425, 0.0, "^", color="#0055cc", markersize=10, zorder=8,
+            label="Drop-off point")
+
     colors = plt.cm.tab10(np.linspace(0, 0.9, trial_df["robot_id"].nunique()))
     for rid, color in zip(sorted(trial_df["robot_id"].unique()), colors):
         rdf = trial_df[trial_df["robot_id"] == rid]
         ax.plot(rdf["x"], rdf["y"], "-", color=color, alpha=0.5, linewidth=0.7)
-        ax.plot(rdf["x"].iloc[0], rdf["y"].iloc[0], "o", color=color, markersize=5,
-                label=f"Robot {rid}")
+        ax.plot(rdf["x"].iloc[0], rdf["y"].iloc[0], "o", color=color,
+                markersize=5, label=f"Robot {rid}")
 
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
@@ -262,29 +277,22 @@ def plot_state_proportions(trial_df: pd.DataFrame,
     states = ["SEARCHING", "PICKUP", "DROPOFF",
               "AVOIDANCE_S", "AVOIDANCE_P", "AVOIDANCE_D"]
     colors_map = {
-        "SEARCHING":   "#4c72b0",
-        "PICKUP":      "#55a868",
-        "DROPOFF":     "#c44e52",
-        "AVOIDANCE_S": "#8172b2",
-        "AVOIDANCE_P": "#ccb974",
-        "AVOIDANCE_D": "#64b5cd",
+        "SEARCHING":   "#4c72b0", "PICKUP":      "#55a868",
+        "DROPOFF":     "#c44e52", "AVOIDANCE_S": "#8172b2",
+        "AVOIDANCE_P": "#ccb974", "AVOIDANCE_D": "#64b5cd",
     }
 
-    # Count robots in each state per timestep
-    pivot = (trial_df.groupby(["time", "state"])
-             .size()
+    pivot = (trial_df.groupby(["time", "state"]).size()
              .unstack(fill_value=0)
              .reindex(columns=states, fill_value=0))
     pivot_pct = pivot.div(pivot.sum(axis=1), axis=0)
 
     fig, ax = plt.subplots(figsize=(12, 4))
     bottom = np.zeros(len(pivot_pct))
-    times = pivot_pct.index.values
-
     for state in states:
         if state in pivot_pct.columns:
             vals = pivot_pct[state].values
-            ax.fill_between(times, bottom, bottom + vals,
+            ax.fill_between(pivot_pct.index.values, bottom, bottom + vals,
                             label=state, alpha=0.85,
                             color=colors_map.get(state, "grey"))
             bottom += vals
@@ -302,7 +310,7 @@ def plot_state_proportions(trial_df: pd.DataFrame,
 
 
 # ---------------------------------------------------------------------------
-# Plot: violation events over time (single trial)
+# Plot: violations timeline
 # ---------------------------------------------------------------------------
 
 def plot_violations_timeline(trial_df: pd.DataFrame,
@@ -315,12 +323,11 @@ def plot_violations_timeline(trial_df: pd.DataFrame,
     ).reset_index()
 
     fig, axes = plt.subplots(3, 1, figsize=(12, 5), sharex=True)
-    pairs = [
+    for ax, col, label, color in [
         (axes[0], "req1_red",   "REQ1 Red",   "red"),
         (axes[1], "req1_amber", "REQ1 Amber", "orange"),
         (axes[2], "req2",       "REQ2",       "purple"),
-    ]
-    for ax, col, label, color in pairs:
+    ]:
         ax.fill_between(ts_df["time"], ts_df[col].values,
                         color=color, alpha=0.6, step="pre")
         ax.set_ylabel(label, fontsize=9)
@@ -337,27 +344,26 @@ def plot_violations_timeline(trial_df: pd.DataFrame,
 
 
 # ---------------------------------------------------------------------------
-# Conditioned analysis (patch attribution)
+# Patch attribution table
 # ---------------------------------------------------------------------------
 
 def patch_attribution_table(dfs: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """
-    For each mode (where patch data exists), compute:
-      - P(REQ1 red viol | on patch)
-      - P(REQ1 red viol | not on patch)
-    across all trials in the aggregated metrics.
-    Requires raw per-timestep data; uses aggregated data as approximation.
-    """
     rows = []
     for mode, df in dfs.items():
         row = {"mode": mode}
-        for col in ["t_red_viol", "t_amber_viol", "t_req2_viol"]:
+        for col in ["t_red_first_viol", "t_red_total_viol",
+                    "t_amber_first_viol", "t_amber_total_viol",
+                    "task_completion_rate"]:
             if col in df.columns:
                 row[f"{col}_mean"] = df[col].mean()
                 row[f"{col}_std"]  = df[col].std()
-        row["p_any_req1_red"]   = df["any_req1_red"].mean() if "any_req1_red" in df else float("nan")
-        row["p_any_req1_amber"] = df["any_req1_amber"].mean() if "any_req1_amber" in df else float("nan")
-        row["p_any_req2"]       = df["any_req2"].mean() if "any_req2" in df else float("nan")
+        for col in ["any_req1_red", "any_req1_amber", "any_req2", "any_req_functional"]:
+            row[f"p_{col}"] = df[col].mean() if col in df else float("nan")
         rows.append(row)
     return pd.DataFrame(rows).set_index("mode")
-def ewd(values, n_bins=5): import numpy as np; bins = np.linspace(min(values), max(values), n_bins+1); return np.digitize(values, bins, right=True)
+
+
+def ewd(values, n_bins=5):
+    import numpy as np
+    bins = np.linspace(min(values), max(values), n_bins + 1)
+    return np.digitize(values, bins, right=True)
